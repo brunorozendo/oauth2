@@ -1,0 +1,10 @@
+.git
+.gitignore
+.idea
+*.md
+specs/
+.specify/
+.agent/
+.claude/
+.env
+*.json
