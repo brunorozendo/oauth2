@@ -1,0 +1,76 @@
+plugins {
+    id 'groovy'
+    id 'java-library'
+}
+
+repositories {
+    gradlePluginPortal()
+    mavenCentral()
+}
+java {
+    toolchain {
+        languageVersion = JavaLanguageVersion.of(21)
+    }
+}
+
+
+dependencies {
+
+    testImplementation platform('org.spockframework:spock-bom:2.4-groovy-5.0')
+    testImplementation 'org.apache.groovy:groovy:5.0.3'
+    testImplementation 'org.spockframework:spock-core:2.4-groovy-5.0'
+    testImplementation("org.junit.platform:junit-platform-launcher")
+
+
+    testImplementation( "com.athaydes:spock-reports:2.5.1-groovy-4.0" ) {
+        transitive = false // this avoids affecting your version of Groovy/Spock
+    }
+    testImplementation 'org.apache.groovy:groovy-json:5.0.3'
+    testImplementation 'org.apache.groovy:groovy-templates:5.0.3'
+    testImplementation 'org.apache.groovy:groovy-xml:5.0.3'
+    testImplementation 'org.objenesis:objenesis:3.3'
+    testImplementation 'net.bytebuddy:byte-buddy:1.14.9'
+    testImplementation 'com.tngtech.archunit:archunit:1.3.0'
+
+}
+
+sourceSets {
+    main {
+        groovy { srcDirs = [] }
+    }
+    test{
+        java{ srcDirs = [] }
+    }
+}
+
+tasks.withType(JavaCompile).configureEach {
+    options.compilerArgs << '-parameters'
+}
+
+test {
+    systemProperty 'com.athaydes.spockframework.report.internal.HtmlReportCreator.inlineCss', 'false'
+    testLogging {
+        events "passed", "skipped", "failed" //Show report when running tests
+    }
+    useJUnitPlatform() //required, if not present the test will not be found by gradle
+
+    // Configure Testcontainers to use Podman socket from podman machine
+    def podmanSocket = new File(System.getProperty("user.home") + "/.local/share/containers/podman/podman.sock")
+    if (!podmanSocket.exists()) {
+        // Try to find podman-machine socket in temp directory
+        def tempPodmanDir = new File("/var/folders").listFiles()?.find { dir ->
+            new File(dir, "T/podman").exists()
+        }
+        if (tempPodmanDir) {
+            def machineSocket = new File(tempPodmanDir, "T/podman").listFiles()?.find {
+                it.name.endsWith("api.sock")
+            }
+            if (machineSocket) {
+                environment "DOCKER_HOST", "unix://${machineSocket.absolutePath}"
+            }
+        }
+    } else {
+        environment "DOCKER_HOST", "unix://${podmanSocket.absolutePath}"
+    }
+    environment "TESTCONTAINERS_RYUK_DISABLED", "true"
+}
