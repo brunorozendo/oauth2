@@ -1,0 +1,38 @@
+plugins {
+    id 'java'
+}
+
+group = 'com.brunorozendo'
+version = '1.0.0'
+
+java {
+    toolchain {
+        languageVersion = JavaLanguageVersion.of(21)
+    }
+}
+
+
+repositories {
+    mavenCentral()
+}
+
+dependencies {
+    // Selenium WebDriver
+    testImplementation 'org.seleniumhq.selenium:selenium-java:4.17.0'
+
+    // Testcontainers for Selenium
+    testImplementation 'org.testcontainers:testcontainers:1.19.3'
+    testImplementation 'org.testcontainers:selenium:1.19.3'
+    testImplementation 'org.testcontainers:junit-jupiter:1.19.3'
+
+    // JUnit 5
+    testImplementation 'org.junit.jupiter:junit-jupiter:5.10.1'
+    testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+
+    // Logging
+    testImplementation 'org.slf4j:slf4j-simple:2.0.10'
+}
+
+test {
+    useJUnitPlatform()
+}

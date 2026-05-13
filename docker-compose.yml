@@ -1,0 +1,30 @@
+version: '3.8'
+
+services:
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: oauth2-backend
+    ports:
+      - "9103:9103"
+    env_file:
+      - .env
+    networks:
+      - oauth2-network
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: oauth2-frontend
+    ports:
+      - "8631:8631"
+    depends_on:
+      - backend
+    networks:
+      - oauth2-network
+
+networks:
+  oauth2-network:
+    driver: bridge

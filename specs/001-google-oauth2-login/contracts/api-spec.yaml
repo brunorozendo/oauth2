@@ -1,0 +1,335 @@
+openapi: 3.0.3
+info:
+  title: OAuth2 Google Login API
+  description: |
+    Backend API for Google OAuth2 authentication with PKCE flow.
+
+    **Session-based authentication**: After successful login, all endpoints use HttpOnly session cookies.
+    Frontend never handles OAuth2 tokens directly.
+  version: 1.0.0
+  contact:
+    name: OAuth2 Project
+    url: https://backend.brunorozendo.dev
+
+servers:
+  - url: https://backend.brunorozendo.dev/api
+    description: Production backend (proxied to localhost:9103)
+
+tags:
+  - name: auth
+    description: Authentication and session management
+
+paths:
+  /auth/login/google:
+    get:
+      tags:
+        - auth
+      summary: Initiate Google OAuth2 login
+      description: |
+        Generates PKCE parameters, stores them in server-side session, and returns
+        Google's authorization URL. Frontend redirects user to this URL.
+      operationId: initiateGoogleLogin
+      responses:
+        '200':
+          description: Authorization URL generated successfully
+          headers:
+            Set-Cookie:
+              description: Session cookie (JSESSIONID)
+              schema:
+                type: string
+                example: JSESSIONID=abc123; Path=/; HttpOnly; Secure; SameSite=Lax
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthorizationUrlResponse'
+              example:
+                authorizationUrl: "https://accounts.google.com/o/oauth2/v2/auth?response_type=code&client_id=CLIENT_ID&redirect_uri=https://backend.brunorozendo.dev/api/auth/callback&scope=openid%20email%20profile&state=STATE&nonce=NONCE&code_challenge=CHALLENGE&code_challenge_method=S256"
+                state: "random-state-value"
+        '500':
+          description: Server error during PKCE generation
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /auth/callback:
+    get:
+      tags:
+        - auth
+      summary: OAuth2 callback endpoint
+      description: |
+        Google redirects here after user grants consent. Validates state, exchanges
+        authorization code for tokens, validates ID token, fetches user info, and
+        creates authenticated session.
+      operationId: handleOAuthCallback
+      parameters:
+        - name: code
+          in: query
+          required: true
+          description: Authorization code from Google
+          schema:
+            type: string
+        - name: state
+          in: query
+          required: true
+          description: CSRF protection token (must match stored value)
+          schema:
+            type: string
+        - name: error
+          in: query
+          required: false
+          description: Error code if user denied consent
+          schema:
+            type: string
+            example: access_denied
+      responses:
+        '302':
+          description: Redirect to frontend dashboard (success) or login page (error)
+          headers:
+            Location:
+              description: Redirect URL
+              schema:
+                type: string
+                example: https://frontend.brunorozendo.dev/dashboard.html
+            Set-Cookie:
+              description: Updated session cookie with authenticated context
+              schema:
+                type: string
+        '400':
+          description: Invalid state parameter or missing code
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                error: "invalid_state"
+                message: "CSRF validation failed. Please try logging in again."
+                tryAgainUrl: "https://frontend.brunorozendo.dev/?retry=true"
+        '401':
+          description: Token validation failed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Token exchange or userinfo request failed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /auth/user:
+    get:
+      tags:
+        - auth
+      summary: Get current authenticated user
+      description: |
+        Returns user profile and token expiration for authenticated session.
+        Used by dashboard to display user info and manage token refresh countdown.
+      operationId: getCurrentUser
+      security:
+        - cookieAuth: []
+      responses:
+        '200':
+          description: User info retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserInfoResponse'
+              example:
+                sub: "google-user-id-12345"
+                email: "user@example.com"
+                name: "John Doe"
+                picture: "https://lh3.googleusercontent.com/..."
+                emailVerified: true
+                expiresAt: 1709136000000
+        '401':
+          description: Not authenticated or session expired
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                error: "session_expired"
+                message: "Your session has expired. Please log in again."
+                tryAgainUrl: "https://frontend.brunorozendo.dev/"
+
+  /auth/refresh:
+    post:
+      tags:
+        - auth
+      summary: Refresh access token
+      description: |
+        Uses stored refresh token to obtain new access token from Google.
+        Can be triggered automatically (when token expires) or manually (user clicks "Refresh Now").
+      operationId: refreshAccessToken
+      security:
+        - cookieAuth: []
+      responses:
+        '200':
+          description: Token refreshed successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TokenRefreshResponse'
+              example:
+                expiresAt: 1709139600000
+                message: "Token refreshed successfully"
+        '401':
+          description: Refresh token invalid or expired
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                error: "refresh_failed"
+                message: "Unable to refresh token. Please log in again."
+                tryAgainUrl: "https://frontend.brunorozendo.dev/"
+        '500':
+          description: Google token endpoint error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /auth/logout:
+    post:
+      tags:
+        - auth
+      summary: Logout and revoke tokens
+      description: |
+        Revokes tokens at Google, invalidates server-side session, and redirects to login page.
+      operationId: logout
+      security:
+        - cookieAuth: []
+      responses:
+        '302':
+          description: Redirect to frontend login page
+          headers:
+            Location:
+              description: Login page URL
+              schema:
+                type: string
+                example: https://frontend.brunorozendo.dev/
+            Set-Cookie:
+              description: Cleared session cookie
+              schema:
+                type: string
+                example: JSESSIONID=; Path=/; Max-Age=0
+        '200':
+          description: Logout successful (if not redirecting)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                    example: "Logged out successfully"
+
+components:
+  securitySchemes:
+    cookieAuth:
+      type: apiKey
+      in: cookie
+      name: JSESSIONID
+      description: HttpOnly session cookie set by backend
+
+  schemas:
+    AuthorizationUrlResponse:
+      type: object
+      required:
+        - authorizationUrl
+        - state
+      properties:
+        authorizationUrl:
+          type: string
+          format: uri
+          description: Google OAuth2 authorization URL with PKCE parameters
+          example: "https://accounts.google.com/o/oauth2/v2/auth?..."
+        state:
+          type: string
+          description: CSRF protection token (echoed from server)
+          minLength: 22
+          example: "random-state-value"
+
+    UserInfoResponse:
+      type: object
+      required:
+        - sub
+        - email
+        - name
+        - picture
+        - emailVerified
+        - expiresAt
+      properties:
+        sub:
+          type: string
+          description: Google user ID (unique identifier)
+          example: "google-user-id-12345"
+        email:
+          type: string
+          format: email
+          description: User email address
+          example: "user@example.com"
+        name:
+          type: string
+          description: User display name (default "Unknown User" if missing)
+          example: "John Doe"
+        picture:
+          type: string
+          format: uri
+          description: Avatar URL (default placeholder if missing)
+          example: "https://lh3.googleusercontent.com/..."
+        emailVerified:
+          type: boolean
+          description: Email verification status from Google
+          example: true
+        expiresAt:
+          type: integer
+          format: int64
+          description: Access token expiration (Unix timestamp in milliseconds)
+          example: 1709136000000
+
+    TokenRefreshResponse:
+      type: object
+      required:
+        - expiresAt
+        - message
+      properties:
+        expiresAt:
+          type: integer
+          format: int64
+          description: New access token expiration (Unix timestamp in milliseconds)
+          example: 1709139600000
+        message:
+          type: string
+          description: Success message
+          example: "Token refreshed successfully"
+
+    ErrorResponse:
+      type: object
+      required:
+        - error
+        - message
+      properties:
+        error:
+          type: string
+          description: Machine-readable error code
+          enum:
+            - session_expired
+            - invalid_state
+            - token_exchange_failed
+            - token_validation_failed
+            - refresh_failed
+            - google_unavailable
+          example: "invalid_state"
+        message:
+          type: string
+          description: Human-readable error message
+          example: "CSRF validation failed. Please try logging in again."
+        tryAgainUrl:
+          type: string
+          format: uri
+          description: URL to retry authentication
+          example: "https://frontend.brunorozendo.dev/?retry=true"
