@@ -29,14 +29,14 @@ public class OAuth2SuccessHandlerConfig {
             @Value("${app.frontend.origin}") String frontendOrigin,
             @Value("${app.mobile.redirect-uris.inventmove:}") String inventmoveUri,
             @Value("${app.mobile.redirect-uris.bossbill:}") String bossbillUri,
-            @Value("${app.mobile.redirect-uris.comprasia:}") String comprasiaUri,
-            @Value("${app.mobile.redirect-uris.comprasia-ios:}") String comprasiaIosUri) {
+            @Value("${app.mobile.redirect-uris.anotadissimo:}") String anotadissimoUri,
+            @Value("${app.mobile.redirect-uris.anotadissimo-ios:}") String anotadissimoIosUri) {
 
         Map<String, String> mobileRedirects = new java.util.HashMap<>();
         if (!inventmoveUri.isBlank()) mobileRedirects.put("inventmove", inventmoveUri);
         if (!bossbillUri.isBlank()) mobileRedirects.put("bossbill", bossbillUri);
-        if (!comprasiaUri.isBlank()) mobileRedirects.put("comprasia", comprasiaUri);
-        if (!comprasiaIosUri.isBlank()) mobileRedirects.put("comprasia-ios", comprasiaIosUri);
+        if (!anotadissimoUri.isBlank()) mobileRedirects.put("anotadissimo", anotadissimoUri);
+        if (!anotadissimoIosUri.isBlank()) mobileRedirects.put("anotadissimo-ios", anotadissimoIosUri);
 
         return (HttpServletRequest request, HttpServletResponse response,
                 Authentication authentication) -> {
@@ -81,7 +81,7 @@ public class OAuth2SuccessHandlerConfig {
 
             if (client != null && mobileRedirects.containsKey(client)) {
                 // Mobile flow: redirect so the app can capture the token. Support both
-                // plain custom-scheme URIs (e.g. "comprasia://auth") and Android
+                // plain custom-scheme URIs (e.g. "anotadissimo://auth") and Android
                 // `intent://...#Intent;…;end` URIs — for the latter, query params must
                 // be inserted BEFORE the `#Intent;…` block.
                 String baseUri = mobileRedirects.get(client);

@@ -33,11 +33,11 @@ app:
       # Android: Chrome silently drops server-302s to plain custom schemes due
       # to its user-activation policy, so use the intent:// form — Chrome
       # honors that explicitly for app launches.
-      comprasia: ${APP_MOBILE_REDIRECT_URIS_COMPRASIA:intent://auth#Intent;scheme=comprasia;package=dev.brunorozendo.anotadissimo;end}
+      anotadissimo: ${APP_MOBILE_REDIRECT_URIS_ANOTADISSIMO:intent://auth#Intent;scheme=anotadissimo;package=dev.brunorozendo.anotadissimo;end}
       # iOS: ASWebAuthenticationSession intercepts custom-scheme redirects
-      # natively, so the plain comprasia://auth URI works. The intent:// form
+      # natively, so the plain anotadissimo://auth URI works. The intent:// form
       # is invalid on iOS — Safari surfaces "address is invalid".
-      comprasia-ios: ${APP_MOBILE_REDIRECT_URIS_COMPRASIA_IOS:comprasia://auth}
+      anotadissimo-ios: ${APP_MOBILE_REDIRECT_URIS_ANOTADISSIMO_IOS:anotadissimo://auth}
   jwt:
     secret: ${JWT_SECRET:default-dev-secret-must-be-at-least-32-bytes-long!!}
     expiration-seconds: ${JWT_EXPIRATION_SECONDS:3600}
