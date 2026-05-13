@@ -1,0 +1,153 @@
+// =============================================================================
+// OAuth2 Frontend Pipeline
+// =============================================================================
+// Triggers: GitHub webhook on push to main branch, path-filtered by Jenkins job
+// Actions: Build frontend image -> Push -> Deploy frontend service
+// =============================================================================
+
+pipeline {
+    agent any
+
+    environment {
+        REGISTRY = '192.168.1.6:5000'
+        IMAGE_NAME = 'oauth2-frontend'
+        IMAGE_TAG = "${BUILD_NUMBER}-${GIT_COMMIT.take(7)}"
+        PROD_SERVER = '192.168.1.16'
+        PROD_USER = 'bruno'
+        PROD_SERVICE = 'oauth2-frontend'
+    }
+
+    options {
+        timeout(time: 30, unit: 'MINUTES')
+        disableConcurrentBuilds()
+        buildDiscarder(logRotator(numToKeepStr: '10'))
+    }
+
+    triggers {
+        githubPush()
+    }
+
+    stages {
+        stage('Checkout') {
+            steps {
+                checkout scm
+                script {
+                    env.GIT_COMMIT_MSG = sh(script: 'git log -1 --pretty=%B', returnStdout: true).trim()
+                    env.GIT_AUTHOR = sh(script: 'git log -1 --pretty=%an', returnStdout: true).trim()
+                    env.GIT_BRANCH_NAME = sh(script: 'git rev-parse --abbrev-ref HEAD', returnStdout: true).trim()
+                }
+                echo """
+                ========================================
+                Build Info:
+                  Commit: ${GIT_COMMIT}
+                  Branch: ${env.GIT_BRANCH_NAME}
+                  Author: ${env.GIT_AUTHOR}
+                  Message: ${env.GIT_COMMIT_MSG}
+                ========================================
+                """
+            }
+        }
+
+        stage('Build Container Image') {
+            steps {
+                script {
+                    echo "Building container image: ${REGISTRY}/${IMAGE_NAME}:${IMAGE_TAG}"
+                    sh """
+                        podman build \
+                            -t ${REGISTRY}/${IMAGE_NAME}:${IMAGE_TAG} \
+                            -t ${REGISTRY}/${IMAGE_NAME}:latest \
+                            --label "git.commit=${GIT_COMMIT}" \
+                            --label "git.branch=${env.GIT_BRANCH_NAME}" \
+                            --label "build.number=${BUILD_NUMBER}" \
+                            frontend
+                    """
+                }
+            }
+        }
+
+        stage('Push to Registry') {
+            steps {
+                script {
+                    echo "Pushing to ${REGISTRY}..."
+                    sh """
+                        podman push --tls-verify=false ${REGISTRY}/${IMAGE_NAME}:${IMAGE_TAG}
+                        podman push --tls-verify=false ${REGISTRY}/${IMAGE_NAME}:latest
+                    """
+                }
+            }
+        }
+
+        stage('Deploy to Production') {
+            steps {
+                script {
+                    echo "Deploying to Production Server: ${PROD_SERVER}"
+
+                    sshagent(['prod-server-ssh']) {
+                        sh """
+                            ssh -o StrictHostKeyChecking=no ${PROD_USER}@${PROD_SERVER} "systemctl --user restart ${PROD_SERVICE}"
+                        """
+
+                        echo "Waiting for service to start..."
+                        sleep 10
+                        sh """
+                            ssh -o StrictHostKeyChecking=no ${PROD_USER}@${PROD_SERVER} "systemctl --user is-active ${PROD_SERVICE}"
+                        """
+                    }
+                }
+            }
+        }
+
+        stage('Verify Deployment') {
+            steps {
+                script {
+                    echo "Verifying deployment..."
+                    sshagent(['prod-server-ssh']) {
+                        sh """
+                            ssh -o StrictHostKeyChecking=no ${PROD_USER}@${PROD_SERVER} "systemctl --user status ${PROD_SERVICE} --no-pager"
+                        """
+                    }
+
+                    sh """
+                        sleep 10
+                        curl -sf https://frontend.brunorozendo.dev
+                    """
+                }
+            }
+        }
+
+        stage('Cleanup') {
+            steps {
+                script {
+                    sh """
+                        podman rmi ${REGISTRY}/${IMAGE_NAME}:${IMAGE_TAG} || true
+                    """
+                }
+            }
+        }
+    }
+
+    post {
+        success {
+            echo """
+            ========================================
+            SUCCESS: Frontend deployment complete!
+
+            Image: ${REGISTRY}/${IMAGE_NAME}:${IMAGE_TAG}
+            Deployment: ${PROD_SERVICE} on ${PROD_SERVER}
+            URL: https://frontend.brunorozendo.dev
+            ========================================
+            """
+        }
+        failure {
+            echo """
+            ========================================
+            FAILED: Frontend pipeline failed!
+            Check the logs above for details.
+            ========================================
+            """
+        }
+        always {
+            cleanWs()
+        }
+    }
+}
