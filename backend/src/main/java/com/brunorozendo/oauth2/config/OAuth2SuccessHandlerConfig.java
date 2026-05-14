@@ -30,13 +30,17 @@ public class OAuth2SuccessHandlerConfig {
             @Value("${app.mobile.redirect-uris.inventmove:}") String inventmoveUri,
             @Value("${app.mobile.redirect-uris.bossbill:}") String bossbillUri,
             @Value("${app.mobile.redirect-uris.anotadissimo:}") String anotadissimoUri,
-            @Value("${app.mobile.redirect-uris.anotadissimo-ios:}") String anotadissimoIosUri) {
+            @Value("${app.mobile.redirect-uris.anotadissimo-ios:}") String anotadissimoIosUri,
+            @Value("${app.mobile.redirect-uris.anotadissimo-web:}") String anotadissimoWebUri,
+            @Value("${app.mobile.redirect-uris.anotadissimo-ext:}") String anotadissimoExtUri) {
 
         Map<String, String> mobileRedirects = new java.util.HashMap<>();
         if (!inventmoveUri.isBlank()) mobileRedirects.put("inventmove", inventmoveUri);
         if (!bossbillUri.isBlank()) mobileRedirects.put("bossbill", bossbillUri);
         if (!anotadissimoUri.isBlank()) mobileRedirects.put("anotadissimo", anotadissimoUri);
         if (!anotadissimoIosUri.isBlank()) mobileRedirects.put("anotadissimo-ios", anotadissimoIosUri);
+        if (!anotadissimoWebUri.isBlank()) mobileRedirects.put("anotadissimo-web", anotadissimoWebUri);
+        if (!anotadissimoExtUri.isBlank()) mobileRedirects.put("anotadissimo-ext", anotadissimoExtUri);
 
         return (HttpServletRequest request, HttpServletResponse response,
                 Authentication authentication) -> {
