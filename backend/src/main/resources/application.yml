@@ -43,10 +43,10 @@ app:
       # then history.replaceState to strip it from the URL.
       anotadissimo-web: ${APP_MOBILE_REDIRECT_URIS_ANOTADISSIMO_WEB:https://anotadissimo.app/auth/callback}
       # Chrome extension. EXTENSION_ID is deterministic from the extension's
-      # manifest.key (set when scaffolding extension-v2). Update this entry
-      # when the extension is first packaged. chrome.identity.launchWebAuthFlow
-      # only accepts redirects to https://<EXTENSION_ID>.chromiumapp.org/<path>.
-      anotadissimo-ext: ${APP_MOBILE_REDIRECT_URIS_ANOTADISSIMO_EXT:https://EXTENSION_ID_PENDING.chromiumapp.org/auth}
+      # manifest.key (RSA 2048 pubkey base64-DER, set in extension-v2/manifest.json).
+      # chrome.identity.launchWebAuthFlow only accepts redirects to the
+      # extension's own https://<EXTENSION_ID>.chromiumapp.org/<path>.
+      anotadissimo-ext: ${APP_MOBILE_REDIRECT_URIS_ANOTADISSIMO_EXT:https://kolhfjpanhkkohchabchkhflimdomcnk.chromiumapp.org/auth}
   jwt:
     secret: ${JWT_SECRET:default-dev-secret-must-be-at-least-32-bytes-long!!}
     expiration-seconds: ${JWT_EXPIRATION_SECONDS:3600}
