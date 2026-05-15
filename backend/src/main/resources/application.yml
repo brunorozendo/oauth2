@@ -38,13 +38,13 @@ app:
       # natively, so the plain anotadissimo://auth URI works. The intent:// form
       # is invalid on iOS — Safari surfaces "address is invalid".
       anotadissimo-ios: ${APP_MOBILE_REDIRECT_URIS_ANOTADISSIMO_IOS:anotadissimo://auth}
-      # Web: SPA mounted at https://anotadissimo.app/login (apex hosts the
-      # Spring Boot landing page; React SPA lives under /login via Cloudflare
+      # Web: SPA mounted at https://anotadissimo.app/s (apex hosts the
+      # Spring Boot landing page; React SPA lives under /s via Cloudflare
       # path-routing — see anotadissimo.app/README §2). The SPA's
-      # /login/auth/callback route reads ?code=… from the URL, POSTs to the
+      # /s/auth/callback route reads ?code=… from the URL, POSTs to the
       # PKCE exchange endpoint, stores tokens in localStorage, then
       # history.replaceState to strip the URL.
-      anotadissimo-web: ${APP_MOBILE_REDIRECT_URIS_ANOTADISSIMO_WEB:https://anotadissimo.app/login/auth/callback}
+      anotadissimo-web: ${APP_MOBILE_REDIRECT_URIS_ANOTADISSIMO_WEB:https://anotadissimo.app/s/auth/callback}
       # Chrome extension. EXTENSION_ID is deterministic from the extension's
       # manifest.key (RSA 2048 pubkey base64-DER, set in extension-v2/manifest.json).
       # chrome.identity.launchWebAuthFlow only accepts redirects to the
