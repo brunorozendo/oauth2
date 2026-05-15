@@ -7,11 +7,19 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.Authentication;
-import org.springframework.web.bind.annotation.*;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RestController;
 
-import java.time.Instant;
 import java.util.Map;
 
+/**
+ * Identity + logout endpoints. The refresh flow now lives in
+ * {@link AuthExchangeController#refresh} — it's body-based and accepts a
+ * refresh token from any caller, so it can't sit here behind the
+ * authenticated() filter.
+ */
 @RestController
 @RequestMapping("/api/auth")
 public class OAuth2Controller {
@@ -38,32 +46,6 @@ public class OAuth2Controller {
 
         logger.debug("User info returned for: {}", principal.getEmail());
         return ResponseEntity.ok(response);
-    }
-
-    @PostMapping("/refresh")
-    public ResponseEntity<?> refreshToken(Authentication authentication,
-                                          HttpServletResponse response) {
-        JwtPrincipal principal = (JwtPrincipal) authentication.getPrincipal();
-
-        Map<String, Object> claims = Map.of(
-                "sub", principal.getSub(),
-                "email", principal.getEmail(),
-                "name", principal.getName(),
-                "picture", principal.getPicture(),
-                "emailVerified", principal.isEmailVerified());
-
-        String token = jwtConfig.generateToken(claims);
-        response.addCookie(jwtConfig.createAuthCookie(token));
-
-        long newExpiresAt = Instant.now()
-                .plusSeconds(jwtConfig.getExpirationSeconds())
-                .toEpochMilli();
-
-        logger.debug("JWT refreshed for user: {}", principal.getEmail());
-
-        return ResponseEntity.ok(Map.of(
-                "expiresAt", newExpiresAt,
-                "message", "Token refreshed successfully"));
     }
 
     @PostMapping("/logout")

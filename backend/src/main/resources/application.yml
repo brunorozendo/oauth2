@@ -50,7 +50,16 @@ app:
   jwt:
     secret: ${JWT_SECRET:default-dev-secret-must-be-at-least-32-bytes-long!!}
     expiration-seconds: ${JWT_EXPIRATION_SECONDS:3600}
+    # Refresh tokens live 30 days by default — long enough that the user
+    # doesn't notice them between sessions, short enough that a leaked one
+    # eventually expires on its own.
+    refresh-expiration-seconds: ${JWT_REFRESH_EXPIRATION_SECONDS:2592000}
     cookie-name: AUTH_TOKEN
+  auth:
+    # Comma-separated extra origins permitted to POST /api/auth/exchange
+    # and /api/auth/refresh. The web SPA at https://anotadissimo.app and
+    # the Chrome extension's chrome-extension://<id> live here.
+    allowed-origins: ${APP_AUTH_ALLOWED_ORIGINS:https://anotadissimo.app,chrome-extension://kolhfjpanhkkohchabchkhflimdomcnk}
 
 logging:
   level:

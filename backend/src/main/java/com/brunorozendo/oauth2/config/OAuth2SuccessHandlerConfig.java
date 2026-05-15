@@ -13,9 +13,10 @@ import org.springframework.security.core.Authentication;
 import org.springframework.security.oauth2.core.user.OAuth2User;
 import org.springframework.security.web.authentication.AuthenticationSuccessHandler;
 
-import java.io.IOException;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
+import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.Map;
 
 @Configuration
@@ -26,6 +27,7 @@ public class OAuth2SuccessHandlerConfig {
     @Bean
     public AuthenticationSuccessHandler oAuth2SuccessHandler(
             JwtConfig jwtConfig,
+            AuthCodeStore codes,
             @Value("${app.frontend.origin}") String frontendOrigin,
             @Value("${app.mobile.redirect-uris.inventmove:}") String inventmoveUri,
             @Value("${app.mobile.redirect-uris.bossbill:}") String bossbillUri,
@@ -34,7 +36,7 @@ public class OAuth2SuccessHandlerConfig {
             @Value("${app.mobile.redirect-uris.anotadissimo-web:}") String anotadissimoWebUri,
             @Value("${app.mobile.redirect-uris.anotadissimo-ext:}") String anotadissimoExtUri) {
 
-        Map<String, String> mobileRedirects = new java.util.HashMap<>();
+        Map<String, String> mobileRedirects = new HashMap<>();
         if (!inventmoveUri.isBlank()) mobileRedirects.put("inventmove", inventmoveUri);
         if (!bossbillUri.isBlank()) mobileRedirects.put("bossbill", bossbillUri);
         if (!anotadissimoUri.isBlank()) mobileRedirects.put("anotadissimo", anotadissimoUri);
@@ -54,28 +56,28 @@ public class OAuth2SuccessHandlerConfig {
             Object sub     = attributes.getOrDefault("sub",                      "unknown");
             Object emailOk = attributes.getOrDefault("email_verified",           false);
 
-            Map<String, Object> claims = Map.of(
-                    "sub",           sub,
-                    "email",         email,
-                    "name",          name,
-                    "picture",       picture,
-                    "emailVerified", emailOk);
+            Map<String, Object> userClaims = new LinkedHashMap<>();
+            userClaims.put("sub",           sub);
+            userClaims.put("email",         email);
+            userClaims.put("name",          name);
+            userClaims.put("picture",       picture);
+            userClaims.put("emailVerified", emailOk);
 
-            String token = jwtConfig.generateToken(claims);
-
-            logger.debug("JWT issued for user: {}", email);
-
-            // Prefer the dedicated mobile-client cookie (set by MobileAuthInitController) —
-            // it survives the OAuth round-trip even when the user is already authenticated
-            // via the AUTH_TOKEN cookie from a prior web login. Falls back to the legacy
-            // session attribute for compatibility with older entry points.
+            // Read all three init cookies up front so we know which client
+            // started the flow and whether they sent PKCE parameters.
             String client = null;
+            String codeChallenge = null;
+            String codeChallengeMethod = null;
             if (request.getCookies() != null) {
                 for (Cookie c : request.getCookies()) {
-                    if (MobileAuthInitController.CLIENT_COOKIE_NAME.equals(c.getName())
-                            && c.getValue() != null && !c.getValue().isBlank()) {
-                        client = c.getValue();
-                        break;
+                    String v = c.getValue();
+                    if (v == null || v.isBlank()) continue;
+                    if (MobileAuthInitController.CLIENT_COOKIE_NAME.equals(c.getName())) {
+                        client = v;
+                    } else if (MobileAuthInitController.CHALLENGE_COOKIE_NAME.equals(c.getName())) {
+                        codeChallenge = v;
+                    } else if (MobileAuthInitController.CHALLENGE_METHOD_COOKIE_NAME.equals(c.getName())) {
+                        codeChallengeMethod = v;
                     }
                 }
             }
@@ -83,48 +85,73 @@ public class OAuth2SuccessHandlerConfig {
                 client = (String) request.getSession(false).getAttribute("oauth2_client");
             }
 
-            if (client != null && mobileRedirects.containsKey(client)) {
-                // Mobile flow: redirect so the app can capture the token. Support both
-                // plain custom-scheme URIs (e.g. "anotadissimo://auth") and Android
-                // `intent://...#Intent;…;end` URIs — for the latter, query params must
-                // be inserted BEFORE the `#Intent;…` block.
-                String baseUri = mobileRedirects.get(client);
-                String query =
-                        "token=" + URLEncoder.encode(token, StandardCharsets.UTF_8)
-                                + "&email=" + URLEncoder.encode(email, StandardCharsets.UTF_8)
-                                + "&name="  + URLEncoder.encode(name, StandardCharsets.UTF_8);
-                int intentHash = baseUri.indexOf("#Intent;");
-                String redirectUrl;
-                if (intentHash >= 0) {
-                    String before = baseUri.substring(0, intentHash);
-                    String intentBlock = baseUri.substring(intentHash);
-                    String sep = before.contains("?") ? "&" : "?";
-                    redirectUrl = before + sep + query + intentBlock;
-                } else {
-                    String sep = baseUri.contains("?") ? "&" : "?";
-                    redirectUrl = baseUri + sep + query;
-                }
-                logger.debug("Mobile redirect → {}", baseUri);
-                // Clear the mobile-client cookie after use.
-                Cookie clear = new Cookie(MobileAuthInitController.CLIENT_COOKIE_NAME, "");
-                clear.setPath("/");
-                clear.setMaxAge(0);
-                clear.setSecure(true);
-                clear.setHttpOnly(true);
-                response.addCookie(clear);
-                // Invalidate the OAuth2 session — mobile clients hold their own JWT.
-                if (request.getSession(false) != null) {
-                    request.getSession(false).invalidate();
-                }
-                response.sendRedirect(redirectUrl);
-            } else {
-                // Web flow: set HttpOnly cookie, redirect to dashboard
-                if (request.getSession(false) != null) {
-                    request.getSession(false).invalidate();
-                }
-                response.addCookie(jwtConfig.createAuthCookie(token));
-                response.sendRedirect(frontendOrigin + "/dashboard.html");
+            // Clear all auth-flow cookies on the way out.
+            clearCookie(response, MobileAuthInitController.CLIENT_COOKIE_NAME);
+            clearCookie(response, MobileAuthInitController.CHALLENGE_COOKIE_NAME);
+            clearCookie(response, MobileAuthInitController.CHALLENGE_METHOD_COOKIE_NAME);
+            if (request.getSession(false) != null) {
+                request.getSession(false).invalidate();
             }
+
+            // Resolve target URI for mobile / extension / web clients.
+            String redirectUri = (client != null) ? mobileRedirects.get(client) : null;
+
+            if (redirectUri != null) {
+                String query;
+                if (codeChallenge != null) {
+                    // PKCE path: issue an opaque code, the client redeems it
+                    // at /api/auth/exchange.
+                    String code = codes.issue(userClaims, codeChallenge, codeChallengeMethod,
+                            client, redirectUri);
+                    query = "code=" + URLEncoder.encode(code, StandardCharsets.UTF_8);
+                    logger.debug("PKCE redirect → {} (code issued for {})", client, email);
+                } else {
+                    // Legacy fallback: mint access + refresh and stamp into
+                    // the redirect URI directly. Phased migration path so
+                    // older clients still work pre-update.
+                    String accessToken = jwtConfig.generateAccessToken(userClaims);
+                    String refreshToken = jwtConfig.generateRefreshToken(userClaims);
+                    query =
+                            "token=" + URLEncoder.encode(accessToken, StandardCharsets.UTF_8)
+                                    + "&refresh=" + URLEncoder.encode(refreshToken, StandardCharsets.UTF_8)
+                                    + "&email=" + URLEncoder.encode(email, StandardCharsets.UTF_8)
+                                    + "&name="  + URLEncoder.encode(name, StandardCharsets.UTF_8);
+                    logger.debug("legacy redirect → {} (token+refresh for {})", client, email);
+                }
+                response.sendRedirect(appendQuery(redirectUri, query));
+                return;
+            }
+
+            // No mobile client — fall through to the legacy web cookie flow.
+            String accessToken = jwtConfig.generateAccessToken(userClaims);
+            response.addCookie(jwtConfig.createAuthCookie(accessToken));
+            response.sendRedirect(frontendOrigin + "/dashboard.html");
         };
+    }
+
+    /** Mobile flows accept both plain custom-scheme URIs (e.g.
+     *  {@code anotadissimo://auth}) and Android intent URIs
+     *  ({@code intent://auth#Intent;…;end}). The Intent block has to stay
+     *  last, so insert query params before {@code #Intent;}. */
+    private static String appendQuery(String baseUri, String query) {
+        int intentHash = baseUri.indexOf("#Intent;");
+        if (intentHash >= 0) {
+            String before = baseUri.substring(0, intentHash);
+            String intentBlock = baseUri.substring(intentHash);
+            String sep = before.contains("?") ? "&" : "?";
+            return before + sep + query + intentBlock;
+        }
+        String sep = baseUri.contains("?") ? "&" : "?";
+        return baseUri + sep + query;
+    }
+
+    private static void clearCookie(HttpServletResponse response, String name) {
+        Cookie clear = new Cookie(name, "");
+        clear.setPath("/");
+        clear.setMaxAge(0);
+        clear.setSecure(true);
+        clear.setHttpOnly(true);
+        clear.setAttribute("SameSite", "Lax");
+        response.addCookie(clear);
     }
 }

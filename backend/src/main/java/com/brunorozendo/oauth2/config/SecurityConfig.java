@@ -34,6 +34,11 @@ public class SecurityConfig {
     @Value("${app.frontend.origin}")
     private String frontendOrigin;
 
+    /** Extra origins (comma-separated) allowed to POST /api/auth/exchange
+     *  and /api/auth/refresh. Mobile / extension / web clients live here. */
+    @Value("${app.auth.allowed-origins:}")
+    private String authAllowedOriginsCsv;
+
     @Autowired
     private ClientRegistrationRepository clientRegistrationRepository;
 
@@ -51,7 +56,12 @@ public class SecurityConfig {
                 .sessionManagement(session -> session
                         .sessionCreationPolicy(SessionCreationPolicy.IF_REQUIRED))
                 .authorizeHttpRequests(auth -> auth
-                        .requestMatchers("/api/auth/user", "/api/auth/refresh", "/api/auth/logout").authenticated()
+                        // /api/auth/user + /logout require a valid access token
+                        // (they identify the caller via JwtPrincipal). /exchange
+                        // and /refresh are authenticated by possession of the
+                        // PKCE code or refresh token in the request body, so
+                        // they must be permitAll here.
+                        .requestMatchers("/api/auth/user", "/api/auth/logout").authenticated()
                         .anyRequest().permitAll())
                 .exceptionHandling(e -> e
                         .defaultAuthenticationEntryPointFor(new HttpStatusEntryPoint(HttpStatus.UNAUTHORIZED),
@@ -107,16 +117,36 @@ public class SecurityConfig {
 
     @Bean
     public CorsConfigurationSource corsConfigurationSource() {
-        CorsConfiguration config = new CorsConfiguration();
-        // Allow the web frontend + any origin for mobile API calls
-        // (Android's OkHttp does not enforce CORS, but listing explicitly is cleaner)
-        config.setAllowedOrigins(List.of(frontendOrigin));
-        config.setAllowedMethods(List.of("GET", "POST", "OPTIONS"));
-        config.setAllowedHeaders(List.of("*"));
-        config.setAllowCredentials(true);
+        // The legacy web frontend keeps the old (credentialed) CORS so the
+        // /api/auth/user + /logout cookies survive.
+        CorsConfiguration credentialed = new CorsConfiguration();
+        credentialed.setAllowedOrigins(List.of(frontendOrigin));
+        credentialed.setAllowedMethods(List.of("GET", "POST", "OPTIONS"));
+        credentialed.setAllowedHeaders(List.of("*"));
+        credentialed.setAllowCredentials(true);
+
+        // /api/auth/exchange + /api/auth/refresh use bearer tokens in the
+        // body — no cookies — so we widen the allowed origins to every
+        // client that needs to call them (web SPA, Chrome extension,
+        // potentially native apps).
+        java.util.List<String> bearerOrigins = new java.util.ArrayList<>();
+        bearerOrigins.add(frontendOrigin);
+        if (authAllowedOriginsCsv != null && !authAllowedOriginsCsv.isBlank()) {
+            for (String o : authAllowedOriginsCsv.split(",")) {
+                String t = o.trim();
+                if (!t.isEmpty() && !bearerOrigins.contains(t)) bearerOrigins.add(t);
+            }
+        }
+        CorsConfiguration bearer = new CorsConfiguration();
+        bearer.setAllowedOrigins(bearerOrigins);
+        bearer.setAllowedMethods(List.of("POST", "OPTIONS"));
+        bearer.setAllowedHeaders(List.of("Content-Type", "Accept", "Authorization"));
+        bearer.setAllowCredentials(false);
 
         UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
-        source.registerCorsConfiguration("/**", config);
+        source.registerCorsConfiguration("/api/auth/exchange", bearer);
+        source.registerCorsConfiguration("/api/auth/refresh", bearer);
+        source.registerCorsConfiguration("/**", credentialed);
         return source;
     }
 }
